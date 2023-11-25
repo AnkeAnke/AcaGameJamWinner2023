@@ -1,7 +1,11 @@
 use bevy::{
+    core_pipeline::clear_color::ClearColorConfig,
     input::mouse::{MouseScrollUnit, MouseWheel},
-    math::vec3,
+    math::{vec2, vec3},
     prelude::*,
+    sprite::Anchor,
+    text::{BreakLineOn, Text2dBounds},
+    utils::Instant,
 };
 use std::f32::consts::*;
 
@@ -11,8 +15,15 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (light_temperature_update, light_switch_update, wall_update).chain(),
+            (
+                light_temperature_update,
+                light_switch_update,
+                wall_update,
+                achievement_update,
+            )
+                .chain(),
         )
+        .add_event::<AchievementAdded>()
         .run();
 }
 #[derive(Component)]
@@ -41,18 +52,42 @@ struct Score {
     value: u32,
 }
 
+#[derive(Resource)]
+struct AchievementStyle {
+    text_style: TextStyle,
+}
+
+#[derive(Component)]
+struct Achievement {
+    spawn_time: Instant,
+    index: usize,
+}
+
+#[derive(Event)]
+struct AchievementAdded {
+    text: String,
+}
+
 const WALL_SIZE_X: f32 = 18.0;
 const WALL_SIZE_Y: f32 = 5.0;
 const TILE_SIZE: f32 = 0.2;
+const ACHIEVEMENT_CARD_HEIGHT: f32 = 100.0;
 
 /// set up a simple 3D scene
 fn setup(
     mut commands: Commands,
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.insert_resource(Score { value: 23946 });
-
+    commands.insert_resource(Score { value: 0 });
+    commands.insert_resource(AchievementStyle {
+        text_style: TextStyle {
+            font: asset_server.load("PublicPixel-z84yD.ttf"),
+            font_size: 20.0,
+            color: Color::hex("#FFF0CE").unwrap(),
+        },
+    });
     // wall
     let mesh = meshes.add(shape::Plane::from_size(TILE_SIZE).into());
     commands.insert_resource(WallTilePalette {
@@ -146,6 +181,18 @@ fn setup(
         transform: Transform::from_xyz(-0.5, 1.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
+
+    // 2d camera
+    commands.spawn(Camera2dBundle {
+        camera: Camera {
+            order: 1,
+            ..default()
+        },
+        camera_2d: Camera2d {
+            clear_color: ClearColorConfig::None,
+        },
+        ..default()
+    });
 }
 
 fn light_switch_update(
@@ -153,6 +200,7 @@ fn light_switch_update(
     mouse_input: Res<Input<MouseButton>>,
     mut query_light: Query<&mut DirectionalLight>,
     mut query_switch: Query<&mut Transform, With<LightSwitch>>,
+    mut achievement_added: EventWriter<AchievementAdded>,
 ) {
     if mouse_input.just_released(MouseButton::Middle) {
         for mut light in query_light.iter_mut() {
@@ -162,6 +210,18 @@ fn light_switch_update(
                 light.illuminance = 5000.0;
             }
             score.value += 1;
+
+            if score.value == 1 {
+                achievement_added.send(AchievementAdded {
+                    text: "Got it!".to_string(),
+                });
+            }
+
+            if score.value == 10 {
+                achievement_added.send(AchievementAdded {
+                    text: "Cookie clicker!".to_string(),
+                });
+            }
         }
     }
     for mut switch in query_switch.iter_mut() {
@@ -320,4 +380,97 @@ fn is_digit_tile(tile: &WallTile, digits: &str, digit_patterns: &[bool]) -> bool
     digit_patterns[current_pattern_block as usize * (DIGIT_SIZE_X * DIGIT_SIZE_Y)
         + digit_x
         + digit_y * DIGIT_SIZE_X]
+}
+
+fn achievement_update(
+    mut commands: Commands,
+    achievement_style: Res<AchievementStyle>,
+    query_ortho: Query<&OrthographicProjection>,
+    mut achievements_added: EventReader<AchievementAdded>,
+    mut achievements: Query<(&mut Transform, &Achievement, Entity)>,
+) {
+    let mut highest_index = 0;
+    let mut shortest_lifetime = None;
+    for (_, achievement, entity) in achievements.iter_mut() {
+        let age = achievement.spawn_time.elapsed().as_secs_f32();
+        if age > 5.0 {
+            commands.entity(entity).despawn_recursive();
+        }
+        if achievement.index > highest_index {
+            highest_index = achievement.index;
+            shortest_lifetime = Some(age);
+        }
+    }
+    let ortho = query_ortho.single();
+
+    let lowest_stack_position = shortest_lifetime.map_or(0.0, |t| (t - 0.8).min(0.0));
+    for (mut transform, achievement, _) in achievements.iter_mut() {
+        let stack_position =
+            lowest_stack_position + highest_index as f32 - achievement.index as f32;
+        transform.translation = achievement_position(ortho.area, stack_position);
+    }
+
+    if lowest_stack_position >= 0.0 {
+        if let Some(event) = achievements_added.read().next() {
+            spawn_achievement(
+                &mut commands,
+                achievement_style.as_ref(),
+                ortho.area,
+                highest_index + 1,
+                &event.text,
+            );
+        }
+    }
+}
+
+fn achievement_position(screen_area: Rect, stack_position: f32) -> Vec3 {
+    vec3(
+        screen_area.max.x,
+        screen_area.min.y + stack_position * ACHIEVEMENT_CARD_HEIGHT,
+        0.0,
+    )
+}
+
+fn spawn_achievement(
+    commands: &mut Commands,
+    achievement_style: &AchievementStyle,
+    screen_area: Rect,
+    achievement_index: usize,
+    text: &str,
+) {
+    let box_size = Vec2::new(200.0, ACHIEVEMENT_CARD_HEIGHT);
+    commands
+        .spawn(SpriteBundle {
+            sprite: Sprite {
+                color: Color::hex("#232D3F").unwrap(),
+                custom_size: Some(Vec2::new(box_size.x, box_size.y)),
+                anchor: Anchor::BottomRight,
+                ..default()
+            },
+            transform: Transform::from_translation(achievement_position(screen_area, -1.0)),
+            ..default()
+        })
+        .with_children(|builder| {
+            builder.spawn(Text2dBundle {
+                text: Text {
+                    sections: vec![TextSection::new(
+                        text.to_string(),
+                        achievement_style.text_style.clone(),
+                    )],
+                    alignment: TextAlignment::Left,
+                    linebreak_behavior: BreakLineOn::WordBoundary,
+                },
+                text_2d_bounds: Text2dBounds {
+                    // Wrap text in the rectangle
+                    size: box_size,
+                },
+                // ensure the text is drawn on top of the box
+                transform: Transform::from_xyz(-box_size.x * 0.5, box_size.y * 0.5, 1.0),
+                ..default()
+            });
+        })
+        .insert(Achievement {
+            spawn_time: Instant::now(),
+            index: achievement_index,
+        });
 }
