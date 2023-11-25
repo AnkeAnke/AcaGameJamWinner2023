@@ -32,8 +32,18 @@ struct WallTile {
 #[derive(Resource)]
 struct WallTilePalette {
     materials: Vec<Handle<StandardMaterial>>,
+    number_material: Handle<StandardMaterial>,
     seed: u64,
 }
+
+#[derive(Resource)]
+struct Score {
+    value: u32,
+}
+
+const WALL_SIZE_X: f32 = 18.0;
+const WALL_SIZE_Y: f32 = 5.0;
+const TILE_SIZE: f32 = 0.2;
 
 /// set up a simple 3D scene
 fn setup(
@@ -41,11 +51,9 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // wall
-    const WALL_SIZE_X: f32 = 18.0;
-    const WALL_SIZE_Y: f32 = 5.0;
-    const TILE_SIZE: f32 = 0.2;
+    commands.insert_resource(Score { value: 23946 });
 
+    // wall
     let mesh = meshes.add(shape::Plane::from_size(TILE_SIZE).into());
     commands.insert_resource(WallTilePalette {
         materials: [
@@ -56,6 +64,7 @@ fn setup(
         .into_iter()
         .map(|color| materials.add(color.into()))
         .collect(),
+        number_material: materials.add(Color::hex("#FFF0CE").unwrap().into()),
         seed: rand::random::<u64>(),
     });
 
@@ -140,6 +149,7 @@ fn setup(
 }
 
 fn light_switch_update(
+    mut score: ResMut<Score>,
     mouse_input: Res<Input<MouseButton>>,
     mut query_light: Query<&mut DirectionalLight>,
     mut query_switch: Query<&mut Transform, With<LightSwitch>>,
@@ -151,6 +161,7 @@ fn light_switch_update(
             } else {
                 light.illuminance = 5000.0;
             }
+            score.value += 1;
         }
     }
     for mut switch in query_switch.iter_mut() {
@@ -225,6 +236,7 @@ fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
 fn wall_update(
     mut wall_tiles: Query<(&WallTile, &mut Handle<StandardMaterial>)>,
     palette: Res<WallTilePalette>,
+    score: Res<Score>,
 ) {
     use rand::Rng;
     use rand::SeedableRng;
@@ -244,7 +256,68 @@ fn wall_update(
         x + y * PATTERN_SIZE
     };
 
+    let digit_patterns = include_str!("digits.txt")
+        .chars()
+        .filter_map(|c| match c {
+            ' ' => Some(false),
+            '\n' => None,
+            '.' => Some(true),
+            _ => unreachable!("Invalid digit pattern"),
+        })
+        .collect::<Vec<_>>();
+
+    let score_str = score.value.to_string();
+
     for (tile, mut material) in wall_tiles.iter_mut() {
-        *material = palette.materials[pattern[pattern_index(tile)]].clone();
+        *material = if is_digit_tile(tile, &score_str, &digit_patterns) {
+            palette.number_material.clone()
+        } else {
+            palette.materials[pattern[pattern_index(tile)]].clone()
+        };
     }
+}
+
+fn is_digit_tile(tile: &WallTile, digits: &str, digit_patterns: &[bool]) -> bool {
+    const TOP_RIGHT_DIGIT_X: usize = (WALL_SIZE_X / TILE_SIZE / 2.0) as usize + 13;
+    const TOP_RIGHT_DIGIT_Y: usize = (WALL_SIZE_Y / TILE_SIZE / 2.0) as usize + 7;
+    const DIGIT_SIZE_X: usize = 3;
+    const DIGIT_SIZE_Y: usize = 5;
+
+    // Are we in the digit area?
+    if tile.x > TOP_RIGHT_DIGIT_X
+        || tile.y > TOP_RIGHT_DIGIT_Y
+        || tile.y <= TOP_RIGHT_DIGIT_Y - DIGIT_SIZE_Y
+    {
+        return false;
+    }
+
+    // First determine in which digit we are
+    let digit_idx = (TOP_RIGHT_DIGIT_X - tile.x) / (DIGIT_SIZE_X + 1);
+    if digit_idx >= digits.len() {
+        return false;
+    }
+    let digit_index = digits.len() - 1 - digit_idx;
+
+    // Where inside this digit are we
+    let digit_x = (TOP_RIGHT_DIGIT_X - tile.x) % (DIGIT_SIZE_X + 1);
+    if digit_x == DIGIT_SIZE_X {
+        return false; // We're in the space between digits!
+    }
+    let digit_x = DIGIT_SIZE_X - digit_x - 1;
+    let digit_y = TOP_RIGHT_DIGIT_Y - tile.y;
+
+    assert!(digit_x < DIGIT_SIZE_X);
+    assert!(digit_y < DIGIT_SIZE_Y);
+
+    let Some(current_char) = digits.chars().nth(digit_index) else {
+        println!("Invalid digit idx: {}", digit_index);
+        return false;
+    };
+    let Some(current_pattern_block) = current_char.to_digit(10) else {
+        println!("Invalid digit index: {}", digit_index);
+        return false;
+    };
+    digit_patterns[current_pattern_block as usize * (DIGIT_SIZE_X * DIGIT_SIZE_Y)
+        + digit_x
+        + digit_y * DIGIT_SIZE_X]
 }
