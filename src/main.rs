@@ -4,6 +4,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
+        .add_systems(Update, light_switch_update)
         .run();
 }
 
@@ -56,13 +57,19 @@ fn setup(
     });
 
     // light
-    commands.spawn(PointLightBundle {
-        point_light: PointLight {
-            intensity: 1500.0,
+    commands.spawn(DirectionalLightBundle {
+        directional_light: DirectionalLight {
+            color: Color::WHITE,
+            illuminance: 5000.0,
             shadows_enabled: true,
-            ..default()
+            ..Default::default()
         },
-        transform: Transform::from_xyz(4.0, 8.0, 4.0),
+        transform: Transform::from_rotation(Quat::from_euler(
+            EulerRot::XYZ,
+            -std::f32::consts::TAU * 0.15,
+            -std::f32::consts::TAU / 16.0,
+            0.0,
+        )),
         ..default()
     });
     // camera
@@ -70,4 +77,19 @@ fn setup(
         transform: Transform::from_xyz(-0.5, 1.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
         ..default()
     });
+}
+
+fn light_switch_update(
+    mouse_input: Res<Input<MouseButton>>,
+    mut query: Query<&mut DirectionalLight>,
+) {
+    if mouse_input.just_released(MouseButton::Middle) {
+        for mut light in query.iter_mut() {
+            if light.illuminance > 0.0 {
+                light.illuminance = 0.0;
+            } else {
+                light.illuminance = 5000.0;
+            }
+        }
+    }
 }
