@@ -11,7 +11,7 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (light_temperature_update, light_switch_update).chain(),
+            (light_temperature_update, light_switch_update, wall_update).chain(),
         )
         .run();
 }
@@ -23,6 +23,18 @@ struct ColorTemperature {
 #[derive(Component)]
 struct LightSwitch;
 
+#[derive(Component)]
+struct WallTile {
+    x: usize,
+    y: usize,
+}
+
+#[derive(Resource)]
+struct WallTilePalette {
+    materials: Vec<Handle<StandardMaterial>>,
+    seed: u64,
+}
+
 /// set up a simple 3D scene
 fn setup(
     mut commands: Commands,
@@ -30,12 +42,40 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // wall
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(shape::Plane::from_size(100.0).into()),
-        material: materials.add(Color::AQUAMARINE.into()),
-        transform: Transform::from_rotation(Quat::from_rotation_x(FRAC_PI_2)),
-        ..default()
+    const WALL_SIZE_X: f32 = 18.0;
+    const WALL_SIZE_Y: f32 = 5.0;
+    const TILE_SIZE: f32 = 0.2;
+
+    let mesh = meshes.add(shape::Plane::from_size(TILE_SIZE).into());
+    commands.insert_resource(WallTilePalette {
+        materials: [
+            Color::hex("#0C356A").unwrap(),
+            Color::hex("#0174BE").unwrap(),
+            Color::hex("#FFC436").unwrap(),
+        ]
+        .into_iter()
+        .map(|color| materials.add(color.into()))
+        .collect(),
+        seed: rand::random::<u64>(),
     });
+
+    for x in 0..=(WALL_SIZE_X / TILE_SIZE) as usize {
+        for y in 0..=(WALL_SIZE_Y / TILE_SIZE) as usize {
+            commands
+                .spawn(PbrBundle {
+                    mesh: mesh.clone(),
+                    // material:
+                    transform: Transform::from_rotation(Quat::from_rotation_x(FRAC_PI_2))
+                        .with_translation(vec3(
+                            x as f32 * TILE_SIZE - WALL_SIZE_X / 2.0,
+                            y as f32 * TILE_SIZE - WALL_SIZE_Y / 2.0,
+                            0.0,
+                        )),
+                    ..default()
+                })
+                .insert(WallTile { x, y });
+        }
+    }
 
     let switch_material = materials.add(Color::WHITE.into());
     // switch
@@ -180,4 +220,31 @@ fn color_temperature_to_rgb(temperature: f32) -> Vec3 {
 fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
     let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
     t * t * (3.0 - 2.0 * t)
+}
+
+fn wall_update(
+    mut wall_tiles: Query<(&WallTile, &mut Handle<StandardMaterial>)>,
+    palette: Res<WallTilePalette>,
+) {
+    use rand::Rng;
+    use rand::SeedableRng;
+
+    // Set random seed
+    let mut rng = rand::rngs::StdRng::seed_from_u64(palette.seed);
+
+    const PATTERN_SIZE: usize = 5;
+    // Clever Anke stuff: Make last color less likely than the others
+    let pattern = (0..PATTERN_SIZE * PATTERN_SIZE)
+        .map(|_| (rng.gen::<usize>() % (palette.materials.len() * 2 - 1)) % palette.materials.len())
+        .collect::<Vec<_>>();
+
+    let pattern_index = |tile: &WallTile| {
+        let x = ((tile.x % (PATTERN_SIZE * 2 - 2)) as i32 - PATTERN_SIZE as i32 + 2).abs() as usize;
+        let y = ((tile.y % (PATTERN_SIZE * 2 - 2)) as i32 - PATTERN_SIZE as i32 + 2).abs() as usize;
+        x + y * PATTERN_SIZE
+    };
+
+    for (tile, mut material) in wall_tiles.iter_mut() {
+        *material = palette.materials[pattern[pattern_index(tile)]].clone();
+    }
 }
