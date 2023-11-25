@@ -1,12 +1,27 @@
-use bevy::{math::vec3, prelude::*};
+use bevy::{
+    input::mouse::{MouseScrollUnit, MouseWheel},
+    math::vec3,
+    prelude::*,
+};
+use std::f32::consts::*;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
-        .add_systems(Update, light_switch_update)
+        .add_systems(
+            Update,
+            (light_temperature_update, light_switch_update).chain(),
+        )
         .run();
 }
+#[derive(Component)]
+struct ColorTemperature {
+    value: f32,
+}
+
+#[derive(Component)]
+struct LightSwitch;
 
 /// set up a simple 3D scene
 fn setup(
@@ -16,9 +31,9 @@ fn setup(
 ) {
     // wall
     commands.spawn(PbrBundle {
-        mesh: meshes.add(shape::Plane::from_size(10.0).into()),
+        mesh: meshes.add(shape::Plane::from_size(100.0).into()),
         material: materials.add(Color::AQUAMARINE.into()),
-        transform: Transform::from_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+        transform: Transform::from_rotation(Quat::from_rotation_x(FRAC_PI_2)),
         ..default()
     });
 
@@ -32,29 +47,34 @@ fn setup(
         material: switch_material.clone(),
         ..default()
     });
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Cylinder {
-            radius: 0.15,
-            height: 0.3,
-            resolution: 32,
-            ..Default::default()
-        })),
-        material: switch_material.clone(),
-        transform: Transform::from_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-        ..default()
-    });
-    commands.spawn(PbrBundle {
-        mesh: meshes.add(Mesh::from(shape::Cylinder {
-            radius: 0.03,
-            height: 0.32,
-            resolution: 32,
-            ..Default::default()
-        })),
-        material: materials.add(Color::BLACK.into()),
-        transform: Transform::from_xyz(0.1, 0.0, 0.0)
-            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-        ..default()
-    });
+    commands
+        .spawn(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Cylinder {
+                radius: 0.15,
+                height: 0.3,
+                resolution: 32,
+                ..Default::default()
+            })),
+            material: switch_material.clone(),
+            transform: Transform::from_rotation(Quat::from_rotation_x(FRAC_PI_2)),
+            ..default()
+        })
+        .insert(LightSwitch);
+    commands
+        .spawn(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Cylinder {
+                radius: 0.03,
+                height: 0.32,
+                resolution: 32,
+                ..Default::default()
+            })),
+            material: materials.add(Color::GRAY.into()),
+            transform: Transform::from_xyz(0.1, 0.0, 0.0)
+                .with_rotation(Quat::from_rotation_x(FRAC_PI_2)),
+            ..default()
+        })
+        .insert(ColorTemperature { value: 0.5 })
+        .insert(LightSwitch);
 
     // light
     commands.spawn(DirectionalLightBundle {
@@ -81,10 +101,11 @@ fn setup(
 
 fn light_switch_update(
     mouse_input: Res<Input<MouseButton>>,
-    mut query: Query<&mut DirectionalLight>,
+    mut query_light: Query<&mut DirectionalLight>,
+    mut query_switch: Query<&mut Transform, With<LightSwitch>>,
 ) {
     if mouse_input.just_released(MouseButton::Middle) {
-        for mut light in query.iter_mut() {
+        for mut light in query_light.iter_mut() {
             if light.illuminance > 0.0 {
                 light.illuminance = 0.0;
             } else {
@@ -92,4 +113,71 @@ fn light_switch_update(
             }
         }
     }
+    for mut switch in query_switch.iter_mut() {
+        switch.translation.z = if mouse_input.pressed(MouseButton::Middle) {
+            -0.05
+        } else {
+            0.0
+        };
+    }
+}
+
+fn light_temperature_update(
+    mut scroll_events: EventReader<MouseWheel>,
+    mut query_light: Query<&mut DirectionalLight>,
+    mut query_switch: Query<&mut Transform, With<ColorTemperature>>,
+    mut query_temperature: Query<&mut ColorTemperature>,
+) {
+    let mut query_temperature = query_temperature.single_mut();
+
+    for event in scroll_events.read() {
+        query_temperature.value += match event.unit {
+            MouseScrollUnit::Line => event.y,
+            MouseScrollUnit::Pixel => {
+                println!("pixel {}", event.y);
+                event.y * 10.0
+            }
+        } * 0.05;
+    }
+    query_temperature.value = f32::clamp(query_temperature.value, 0.0, 1.0);
+
+    for mut switch in query_switch.iter_mut() {
+        let angle = TAU * query_temperature.value * 0.8;
+        switch.translation = Vec3::new(0.1 * angle.cos(), 0.1 * angle.sin(), 0.0);
+    }
+
+    for mut light in query_light.iter_mut() {
+        light.color = color_temperature_to_rgb(3000.0 + query_temperature.value * 4000.0)
+            .extend(1.0)
+            .into();
+    }
+}
+
+fn color_temperature_to_rgb(temperature: f32) -> Vec3 {
+    // Values from: http://blenderartists.org/forum/showthread.php?270332-OSL-Goodness&p=2268693&viewfull=1#post2268693
+    let m = if temperature <= 6500.0 {
+        Mat3::from_cols(
+            vec3(0.0, -2902.1955373783176, -8257.7997278925690),
+            vec3(0.0, 1669.5803561666639, 2575.2827530017594),
+            vec3(1.0, 1.3302673723350029, 1.8993753891711275),
+        )
+    } else {
+        Mat3::from_cols(
+            vec3(1745.0425298314172, 1216.6168361476490, -8257.7997278925690),
+            vec3(-2666.3474220535695, -2173.1012343082230, 2575.2827530017594),
+            vec3(0.55995389139931482, 0.70381203140554553, 1.8993753891711275),
+        )
+    };
+    let temperature = temperature.clamp(1000.0, 40000.0);
+    Vec3::lerp(
+        (m.col(0) / (Vec3::splat(temperature.clamp(1000.0, 40000.0)) + m.col(1)) + m.col(2))
+            .clamp(Vec3::ZERO, Vec3::ONE),
+        Vec3::ONE,
+        smoothstep(1000.0, 0.0, temperature),
+    )
+}
+
+fn smoothstep(edge0: f32, edge1: f32, x: f32) -> f32 {
+    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
