@@ -98,9 +98,9 @@ struct Score {
 const WALL_SIZE_X: f32 = 18.0;
 const WALL_SIZE_Y: f32 = 5.0;
 const TILE_SIZE: f32 = 0.2;
-const CLOCK_MINUTE_HAND_LENGTH: f32 = 0.45;
-const CLOCK_HOUR_HAND_LENGTH: f32 = 0.22;
-const CLOCK_RADIUS: f32 = 0.5;
+const CLOCK_RADIUS: f32 = 0.4;
+const CLOCK_MINUTE_HAND_LENGTH: f32 = CLOCK_RADIUS * 0.9;
+const CLOCK_HOUR_HAND_LENGTH: f32 = CLOCK_RADIUS * 0.45;
 
 #[derive(Component, Copy, Clone)]
 enum ClockHand {
@@ -211,33 +211,32 @@ fn setup(
                 resolution: 64,
                 ..Default::default()
             })),
-            material: materials.add(Color::WHITE.into()),
-            transform: Transform::from_xyz(-1.6, 0.9, 0.01)
+            material: materials.add(Color::DARK_GRAY.into()),
+            transform: Transform::from_xyz(-1.6, 0.9, 0.02)
                 .with_rotation(Quat::from_rotation_x(FRAC_PI_2)),
             ..default()
         })
         .with_children(|builder| {
-            // Frame
+            let hand_material = materials.add(StandardMaterial {
+                cull_mode: None,
+                ..Color::GRAY.into()
+            });
             builder.spawn(PbrBundle {
-                mesh: meshes.add(Mesh::from(shape::Torus {
-                    radius: CLOCK_RADIUS,
-                    ring_radius: 0.02,
-                    subdivisions_segments: 64,
-                    subdivisions_sides: 16,
+                mesh: meshes.add(Mesh::from(shape::Cylinder {
+                    radius: CLOCK_RADIUS * 1.1,
+                    height: 0.01,
+                    resolution: 64,
+                    ..Default::default()
                 })),
-                material: materials.add(Color::BLACK.into()),
+                material: hand_material.clone(),
+
                 ..default()
             });
 
-            let hand_material = materials.add(Color::DARK_GRAY.into());
             // Minute hand
             builder
                 .spawn(PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::Capsule {
-                        radius: 0.015,
-                        depth: CLOCK_MINUTE_HAND_LENGTH,
-                        ..Default::default()
-                    })),
+                    mesh: meshes.add(Mesh::from(shape::Plane::default())),
                     material: hand_material.clone(),
                     transform: clock_hand_transform(ClockHand::Minute),
                     ..default()
@@ -246,13 +245,9 @@ fn setup(
             // Hour hand
             builder
                 .spawn(PbrBundle {
-                    mesh: meshes.add(Mesh::from(shape::Capsule {
-                        radius: 0.015,
-                        depth: CLOCK_HOUR_HAND_LENGTH,
-                        ..Default::default()
-                    })),
+                    mesh: meshes.add(Mesh::from(shape::Plane::default())),
                     material: hand_material.clone(),
-                    transform: clock_hand_transform(ClockHand::Hour),
+                    transform: clock_hand_transform(ClockHand::Minute),
                     ..default()
                 })
                 .insert(ClockHand::Hour);
@@ -522,15 +517,15 @@ fn clock_hand_transform(hand: ClockHand) -> Transform {
     match hand {
         ClockHand::Minute => {
             let minute_angle = local_time.minute() as f32 / 59.0 * (TAU * 59.0 / 60.0);
-            Transform::from_rotation(Quat::from_rotation_x(FRAC_PI_2))
-                * Transform::from_rotation(Quat::from_rotation_z(minute_angle))
-                * Transform::from_xyz(0.0, -CLOCK_MINUTE_HAND_LENGTH * 0.5, -0.02)
+            Transform::from_rotation(Quat::from_rotation_y(minute_angle))
+                * Transform::from_scale(vec3(0.03, 1.0, CLOCK_MINUTE_HAND_LENGTH))
+                    .with_translation(vec3(0.0, 0.03, -CLOCK_MINUTE_HAND_LENGTH / 2.0 + 0.015))
         }
         ClockHand::Hour => {
             let hour_angle = local_time.hour() as f32 / 11.0 * (TAU * 11.0 / 12.0);
-            Transform::from_rotation(Quat::from_rotation_x(FRAC_PI_2))
-                * Transform::from_rotation(Quat::from_rotation_z(hour_angle))
-                * Transform::from_xyz(0.0, -CLOCK_HOUR_HAND_LENGTH * 0.5, -0.02)
+            Transform::from_rotation(Quat::from_rotation_y(hour_angle))
+                * Transform::from_scale(vec3(0.03, 1.0, CLOCK_HOUR_HAND_LENGTH))
+                    .with_translation(vec3(0.0, 0.03, -CLOCK_HOUR_HAND_LENGTH / 2.0 + 0.015))
         }
     }
 }
