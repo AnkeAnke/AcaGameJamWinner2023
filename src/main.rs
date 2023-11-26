@@ -1,17 +1,43 @@
 use bevy::{
     core_pipeline::clear_color::ClearColorConfig,
     input::mouse::{MouseScrollUnit, MouseWheel},
-    math::{vec2, vec3},
+    math::vec3,
     prelude::*,
     sprite::Anchor,
     text::{BreakLineOn, Text2dBounds},
     utils::Instant,
 };
-use std::{collections::VecDeque, f32::consts::*};
+use std::{
+    collections::VecDeque,
+    f32::consts::*,
+    path::{Path, PathBuf},
+};
+
+// https://github.com/bevyengine/bevy/pull/10383
+#[doc(hidden)]
+pub fn _embedded_asset_path(
+    crate_name: &str,
+    src_prefix: &Path,
+    file_path: &Path,
+    asset_path: &Path,
+) -> PathBuf {
+    let mut maybe_parent = file_path.parent();
+    let after_src = loop {
+        let Some(parent) = maybe_parent else {
+            panic!("Failed to find src_prefix {src_prefix:?} in {file_path:?}")
+        };
+        if parent.ends_with(src_prefix) {
+            break file_path.strip_prefix(parent).unwrap();
+        }
+        maybe_parent = parent.parent();
+    };
+    let asset_path = after_src.parent().unwrap().join(asset_path);
+    Path::new(crate_name).join(asset_path)
+}
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -22,9 +48,26 @@ fn main() {
                 achievement_update,
             )
                 .chain(),
-        )
-        .run();
+        );
+    // Workaround https://github.com/bevyengine/bevy/issues/10377
+    //embedded_asset!(app, "./PublicPixel-z84yD.ttf");
+    {
+        let embedded = app
+            .world
+            .resource_mut::<bevy::asset::io::embedded::EmbeddedAssetRegistry>();
+        let crate_name = module_path!().split(':').next().unwrap();
+        let path = _embedded_asset_path(
+            crate_name,
+            "src".as_ref(),
+            file!().as_ref(),
+            "PublicPixel-z84yD.ttf".as_ref(),
+        );
+        let full_path = std::path::PathBuf::new();
+        embedded.insert_asset(full_path, &path, include_bytes!("PublicPixel-z84yD.ttf"));
+    }
+    app.run();
 }
+
 #[derive(Component)]
 struct ColorTemperature {
     value: f32,
@@ -98,7 +141,7 @@ fn setup(
 
     commands.insert_resource(AchievementStyle {
         text_style: TextStyle {
-            font: asset_server.load("PublicPixel-z84yD.ttf"),
+            font: asset_server.load("embedded://aca_gamejam_winner2023/PublicPixel-z84yD.ttf"),
             font_size: 20.0,
             color: Color::hex("#FFF0CE").unwrap(),
         },
