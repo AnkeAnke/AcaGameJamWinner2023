@@ -25,12 +25,13 @@ pub struct AchievementToBeAdded {
     pub text: String,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Default)]
 pub struct AchievementQueue {
     pub queue: VecDeque<AchievementToBeAdded>,
     pub num_achieved_achievements: usize,
     pub was_dimmer_used: bool,
     pub was_achievement_achieved: bool,
+    pub time_flies_achieved: bool,
 }
 
 pub fn achievement_update(
@@ -96,7 +97,7 @@ fn spawn_achievement(
     achievement_index: usize,
     text: &str,
 ) {
-    let box_size = Vec2::new(200.0, ACHIEVEMENT_CARD_HEIGHT);
+    let box_size = Vec2::new(250.0, ACHIEVEMENT_CARD_HEIGHT);
     commands
         .spawn(SpriteBundle {
             sprite: Sprite {

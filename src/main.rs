@@ -6,7 +6,6 @@ use bevy::{
     prelude::*,
 };
 use std::{
-    collections::VecDeque,
     f32::consts::*,
     path::{Path, PathBuf},
 };
@@ -38,6 +37,7 @@ pub fn _embedded_asset_path(
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
+        //.add_plugins((bevy::diagnostic::LogDiagnosticsPlugin::default(), bevy::diagnostic::FrameTimeDiagnosticsPlugin))
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -46,8 +46,9 @@ fn main() {
                 light_switch_update,
                 wall_update,
                 achievement_update,
-            )
-                .chain(),
+                update_clock_hands,
+                clock_achievement_check,
+            ),
         );
     // Workaround https://github.com/bevyengine/bevy/issues/10377
     //embedded_asset!(app, "./PublicPixel-z84yD.ttf");
@@ -97,6 +98,20 @@ struct Score {
 const WALL_SIZE_X: f32 = 18.0;
 const WALL_SIZE_Y: f32 = 5.0;
 const TILE_SIZE: f32 = 0.2;
+const CLOCK_MINUTE_HAND_LENGTH: f32 = 0.45;
+const CLOCK_HOUR_HAND_LENGTH: f32 = 0.22;
+const CLOCK_RADIUS: f32 = 0.5;
+
+#[derive(Component, Copy, Clone)]
+enum ClockHand {
+    Minute,
+    Hour,
+}
+
+#[derive(Resource)]
+struct StartupWallClockTime {
+    time: chrono::DateTime<chrono::Local>,
+}
 
 /// set up a simple 3D scene
 fn setup(
@@ -106,14 +121,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.insert_resource(Score { value: 0 });
-
-    commands.insert_resource(AchievementQueue {
-        queue: VecDeque::new(),
-        num_achieved_achievements: 0,
-        was_dimmer_used: false,
-        was_achievement_achieved: false,
-    });
-
+    commands.insert_resource(AchievementQueue::default());
     commands.insert_resource(AchievementStyle {
         text_style: TextStyle {
             font: asset_server.load("embedded://aca_gamejam_winner2023/PublicPixel-z84yD.ttf"),
@@ -194,6 +202,65 @@ fn setup(
         .insert(ColorTemperature { value: 0.5 })
         .insert(LightSwitch);
 
+    // Clock
+    commands
+        .spawn(PbrBundle {
+            mesh: meshes.add(Mesh::from(shape::Cylinder {
+                radius: CLOCK_RADIUS,
+                height: 0.02,
+                resolution: 64,
+                ..Default::default()
+            })),
+            material: materials.add(Color::WHITE.into()),
+            transform: Transform::from_xyz(-1.6, 0.9, 0.01)
+                .with_rotation(Quat::from_rotation_x(FRAC_PI_2)),
+            ..default()
+        })
+        .with_children(|builder| {
+            // Frame
+            builder.spawn(PbrBundle {
+                mesh: meshes.add(Mesh::from(shape::Torus {
+                    radius: CLOCK_RADIUS,
+                    ring_radius: 0.02,
+                    subdivisions_segments: 64,
+                    subdivisions_sides: 16,
+                })),
+                material: materials.add(Color::BLACK.into()),
+                ..default()
+            });
+
+            let hand_material = materials.add(Color::DARK_GRAY.into());
+            // Minute hand
+            builder
+                .spawn(PbrBundle {
+                    mesh: meshes.add(Mesh::from(shape::Capsule {
+                        radius: 0.015,
+                        depth: CLOCK_MINUTE_HAND_LENGTH,
+                        ..Default::default()
+                    })),
+                    material: hand_material.clone(),
+                    transform: clock_hand_transform(ClockHand::Minute),
+                    ..default()
+                })
+                .insert(ClockHand::Minute);
+            // Hour hand
+            builder
+                .spawn(PbrBundle {
+                    mesh: meshes.add(Mesh::from(shape::Capsule {
+                        radius: 0.015,
+                        depth: CLOCK_HOUR_HAND_LENGTH,
+                        ..Default::default()
+                    })),
+                    material: hand_material.clone(),
+                    transform: clock_hand_transform(ClockHand::Hour),
+                    ..default()
+                })
+                .insert(ClockHand::Hour);
+        });
+    commands.insert_resource(StartupWallClockTime {
+        time: chrono::Local::now(),
+    });
+
     // light
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
@@ -210,6 +277,7 @@ fn setup(
         )),
         ..default()
     });
+
     // camera
     commands.spawn(Camera3dBundle {
         transform: Transform::from_xyz(-0.5, 1.0, 4.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -421,4 +489,48 @@ fn is_digit_tile(tile: &WallTile, digits: &str, digit_patterns: &[bool]) -> bool
     digit_patterns[current_pattern_block as usize * (DIGIT_SIZE_X * DIGIT_SIZE_Y)
         + digit_x
         + digit_y * DIGIT_SIZE_X]
+}
+
+fn update_clock_hands(mut query: Query<(&mut Transform, &ClockHand)>) {
+    for (mut transform, hand) in query.iter_mut() {
+        *transform = clock_hand_transform(*hand);
+    }
+}
+
+fn clock_achievement_check(
+    start_time: Res<StartupWallClockTime>,
+    mut achievement_queue: ResMut<AchievementQueue>,
+) {
+    if achievement_queue.time_flies_achieved {
+        return;
+    }
+
+    use chrono::prelude::*;
+    let local_time = Local::now();
+    if local_time.minute() != start_time.time.minute() {
+        achievement_queue.queue.push_back(AchievementToBeAdded {
+            text: "Time flies when you're having fun".to_string(),
+        });
+        achievement_queue.time_flies_achieved = true;
+    }
+}
+
+fn clock_hand_transform(hand: ClockHand) -> Transform {
+    use chrono::prelude::*;
+    let local_time = Local::now();
+
+    match hand {
+        ClockHand::Minute => {
+            let minute_angle = local_time.minute() as f32 / 59.0 * (TAU * 59.0 / 60.0);
+            Transform::from_rotation(Quat::from_rotation_x(FRAC_PI_2))
+                * Transform::from_rotation(Quat::from_rotation_z(minute_angle))
+                * Transform::from_xyz(0.0, -CLOCK_MINUTE_HAND_LENGTH * 0.5, -0.02)
+        }
+        ClockHand::Hour => {
+            let hour_angle = local_time.hour() as f32 / 11.0 * (TAU * 11.0 / 12.0);
+            Transform::from_rotation(Quat::from_rotation_x(FRAC_PI_2))
+                * Transform::from_rotation(Quat::from_rotation_z(hour_angle))
+                * Transform::from_xyz(0.0, -CLOCK_HOUR_HAND_LENGTH * 0.5, -0.02)
+        }
+    }
 }
