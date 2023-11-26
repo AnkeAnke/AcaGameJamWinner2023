@@ -1,10 +1,13 @@
-use achievements::{achievement_update, AchievementQueue, AchievementStyle, AchievementToBeAdded};
+use achievements::{
+    achievement_update, setup_achievements, AchievementQueue, AchievementToBeAdded,
+};
 use bevy::{
     core_pipeline::clear_color::ClearColorConfig,
     input::mouse::{MouseScrollUnit, MouseWheel},
     math::vec3,
     prelude::*,
 };
+use bevy_hanabi::prelude::*;
 use std::{
     f32::consts::*,
     path::{Path, PathBuf},
@@ -50,20 +53,27 @@ macro_rules! embedded_asset {
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins)
-        //.add_plugins((bevy::diagnostic::LogDiagnosticsPlugin::default(), bevy::diagnostic::FrameTimeDiagnosticsPlugin))
-        .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (
-                light_temperature_update,
-                light_switch_update,
-                wall_update,
-                achievement_update,
-                update_clock_hands,
-                clock_achievement_check,
-            ),
-        );
+    app.add_plugins(DefaultPlugins.set(WindowPlugin {
+        primary_window: Some(Window {
+            title: "AcaGameJam Winner 2023".to_string(),
+            ..default()
+        }),
+        ..default()
+    }))
+    .add_plugins(HanabiPlugin)
+    //.add_plugins((bevy::diagnostic::LogDiagnosticsPlugin::default(), bevy::diagnostic::FrameTimeDiagnosticsPlugin))
+    .add_systems(Startup, (setup, setup_achievements))
+    .add_systems(
+        Update,
+        (
+            light_temperature_update,
+            light_switch_update,
+            wall_update,
+            achievement_update,
+            update_clock_hands,
+            clock_achievement_check,
+        ),
+    );
     embedded_asset!(app, "./PublicPixel-z84yD.ttf");
     embedded_asset!(app, "./achievement.ogg");
     app.run();
@@ -100,7 +110,7 @@ const WALL_SIZE_Y: f32 = 5.0;
 const TILE_SIZE: f32 = 0.2;
 const CLOCK_RADIUS: f32 = 0.4;
 const CLOCK_MINUTE_HAND_LENGTH: f32 = CLOCK_RADIUS * 0.9;
-const CLOCK_HOUR_HAND_LENGTH: f32 = CLOCK_RADIUS * 0.45;
+const CLOCK_HOUR_HAND_LENGTH: f32 = CLOCK_RADIUS * 0.5;
 
 #[derive(Component, Copy, Clone)]
 enum ClockHand {
@@ -116,20 +126,12 @@ struct StartupWallClockTime {
 /// set up a simple 3D scene
 fn setup(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    // asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.insert_resource(Score { value: 0 });
     commands.insert_resource(AchievementQueue::default());
-    commands.insert_resource(AchievementStyle {
-        text_style: TextStyle {
-            font: asset_server.load("embedded://aca_gamejam_winner2023/PublicPixel-z84yD.ttf"),
-            font_size: 20.0,
-            color: Color::hex("#FFF0CE").unwrap(),
-        },
-        sound: asset_server.load("embedded://aca_gamejam_winner2023/achievement.ogg"),
-    });
 
     // wall
     let mesh = meshes.add(shape::Plane::from_size(TILE_SIZE).into());
@@ -281,7 +283,7 @@ fn setup(
     });
 
     // 2d camera
-    commands.spawn(Camera2dBundle {
+    let mut camera2d = Camera2dBundle {
         camera: Camera {
             order: 1,
             ..default()
@@ -290,7 +292,10 @@ fn setup(
             clear_color: ClearColorConfig::None,
         },
         ..default()
-    });
+    };
+    // camera2d.projection.scale = 1.0;
+    // camera2d.projection.scaling_mode = ScalingMode::FixedVertical(1.);
+    commands.spawn(camera2d);
 }
 
 fn light_switch_update(
@@ -518,15 +523,15 @@ fn clock_hand_transform(hand: ClockHand) -> Transform {
     match hand {
         ClockHand::Minute => {
             let minute_angle = local_time.minute() as f32 / 59.0 * (TAU * 59.0 / 60.0);
-            Transform::from_rotation(Quat::from_rotation_y(minute_angle))
+            Transform::from_rotation(Quat::from_rotation_y(-minute_angle))
                 * Transform::from_scale(vec3(0.03, 1.0, CLOCK_MINUTE_HAND_LENGTH))
                     .with_translation(vec3(0.0, 0.03, -CLOCK_MINUTE_HAND_LENGTH / 2.0 + 0.015))
         }
         ClockHand::Hour => {
             let hour_angle = local_time.hour() as f32 / 11.0 * (TAU * 11.0 / 12.0);
-            Transform::from_rotation(Quat::from_rotation_y(hour_angle))
+            Transform::from_rotation(Quat::from_rotation_y(-hour_angle))
                 * Transform::from_scale(vec3(0.03, 1.0, CLOCK_HOUR_HAND_LENGTH))
-                    .with_translation(vec3(0.0, 0.03, -CLOCK_HOUR_HAND_LENGTH / 2.0 + 0.015))
+                    .with_translation(vec3(0.0, 0.04, -CLOCK_HOUR_HAND_LENGTH / 2.0 + 0.015))
         }
     }
 }

@@ -5,6 +5,7 @@ use bevy::{
     text::{BreakLineOn, Text2dBounds},
     utils::Instant,
 };
+use bevy_hanabi::prelude::*;
 use std::collections::VecDeque;
 
 const ACHIEVEMENT_CARD_HEIGHT: f32 = 100.0;
@@ -12,6 +13,7 @@ const ACHIEVEMENT_CARD_HEIGHT: f32 = 100.0;
 #[derive(Resource)]
 pub struct AchievementStyle {
     pub text_style: TextStyle,
+    pub particle_style: Handle<EffectAsset>,
     pub sound: Handle<AudioSource>,
 }
 
@@ -33,6 +35,63 @@ pub struct AchievementQueue {
     pub was_dimmer_used: bool,
     pub was_achievement_achieved: bool,
     pub time_flies_achieved: bool,
+}
+
+pub fn setup_achievements(
+    mut commands: Commands,
+    mut effects: ResMut<Assets<EffectAsset>>,
+    asset_server: Res<AssetServer>,
+) {
+    let mut gradient = Gradient::new();
+    gradient.add_key(0.0, Vec4::new(1.0, 0.9, 1.0, 1.0));
+    gradient.add_key(1.0, Vec4::new(0.5, 0.5, 1.0, 0.0));
+
+    let writer = ExprWriter::new();
+
+    let age = writer.lit(0.).expr();
+    let init_age = SetAttributeModifier::new(Attribute::AGE, age);
+
+    let lifetime = writer.lit(5.).expr();
+    let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, lifetime);
+
+    let init_pos = SetPositionCircleModifier {
+        center: writer.lit(Vec3::ZERO).expr(),
+        axis: writer.lit(Vec3::Z).expr(),
+        radius: writer.lit(ACHIEVEMENT_CARD_HEIGHT * 0.5).expr(),
+        dimension: ShapeDimension::Surface,
+    };
+
+    let init_vel = SetVelocityCircleModifier {
+        center: writer.lit(Vec3::ZERO).expr(),
+        axis: writer.lit(Vec3::Z).expr(),
+        speed: writer.lit(20.0).expr(),
+    };
+
+    let spawner = Spawner::once(30.0.into(), true);
+    let effect = effects.add(
+        EffectAsset::new(4096, spawner, writer.finish())
+            .with_simulation_space(SimulationSpace::Local)
+            .with_name("2d")
+            .init(init_pos)
+            .init(init_vel)
+            .init(init_age)
+            .init(init_lifetime)
+            .render(SizeOverLifetimeModifier {
+                gradient: Gradient::constant(Vec2::splat(10.0)),
+                screen_space_size: false,
+            })
+            .render(ColorOverLifetimeModifier { gradient }),
+    );
+
+    commands.insert_resource(AchievementStyle {
+        text_style: TextStyle {
+            font: asset_server.load("embedded://aca_gamejam_winner2023/PublicPixel-z84yD.ttf"),
+            font_size: 20.0,
+            color: Color::hex("#FFF0CE").unwrap(),
+        },
+        sound: asset_server.load("embedded://aca_gamejam_winner2023/achievement.ogg"),
+        particle_style: effect,
+    });
 }
 
 pub fn achievement_update(
@@ -98,7 +157,7 @@ fn spawn_achievement(
     achievement_index: usize,
     text: &str,
 ) {
-    let box_size = Vec2::new(250.0, ACHIEVEMENT_CARD_HEIGHT);
+    let box_size = Vec2::new(300.0, ACHIEVEMENT_CARD_HEIGHT);
     commands
         .spawn(SpriteBundle {
             sprite: Sprite {
@@ -128,6 +187,13 @@ fn spawn_achievement(
                 transform: Transform::from_xyz(-box_size.x * 0.5, box_size.y * 0.5, 1.0),
                 ..default()
             });
+            builder
+                .spawn(ParticleEffectBundle {
+                    effect: ParticleEffect::new(achievement_style.particle_style.clone()),
+                    transform: Transform::from_xyz(-box_size.x * 0.5, box_size.y * 0.5, 0.9),
+                    ..default()
+                })
+                .insert(Name::new("effect:2d"));
         })
         .insert(Achievement {
             spawn_time: Instant::now(),
