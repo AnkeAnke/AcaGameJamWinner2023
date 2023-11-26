@@ -12,6 +12,7 @@ const ACHIEVEMENT_CARD_HEIGHT: f32 = 100.0;
 #[derive(Resource)]
 pub struct AchievementStyle {
     pub text_style: TextStyle,
+    pub sound: Handle<AudioSource>,
 }
 
 #[derive(Component)]
@@ -132,4 +133,9 @@ fn spawn_achievement(
             spawn_time: Instant::now(),
             index: achievement_index,
         });
+
+    commands.spawn(AudioBundle {
+        source: achievement_style.sound.clone(),
+        settings: PlaybackSettings::DESPAWN,
+    });
 }

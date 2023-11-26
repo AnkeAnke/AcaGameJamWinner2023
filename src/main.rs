@@ -34,6 +34,20 @@ pub fn _embedded_asset_path(
     Path::new(crate_name).join(asset_path)
 }
 
+// Workaround https://github.com/bevyengine/bevy/issues/10377
+macro_rules! embedded_asset {
+    ($app: ident, $path: expr) => {{
+        let embedded = $app
+            .world
+            .resource_mut::<bevy::asset::io::embedded::EmbeddedAssetRegistry>();
+        let crate_name = module_path!().split(':').next().unwrap();
+        let path =
+            _embedded_asset_path(crate_name, "src".as_ref(), file!().as_ref(), $path.as_ref());
+        let full_path = std::path::PathBuf::new();
+        embedded.insert_asset(full_path, &path, include_bytes!($path));
+    }};
+}
+
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
@@ -50,22 +64,8 @@ fn main() {
                 clock_achievement_check,
             ),
         );
-    // Workaround https://github.com/bevyengine/bevy/issues/10377
-    //embedded_asset!(app, "./PublicPixel-z84yD.ttf");
-    {
-        let embedded = app
-            .world
-            .resource_mut::<bevy::asset::io::embedded::EmbeddedAssetRegistry>();
-        let crate_name = module_path!().split(':').next().unwrap();
-        let path = _embedded_asset_path(
-            crate_name,
-            "src".as_ref(),
-            file!().as_ref(),
-            "PublicPixel-z84yD.ttf".as_ref(),
-        );
-        let full_path = std::path::PathBuf::new();
-        embedded.insert_asset(full_path, &path, include_bytes!("PublicPixel-z84yD.ttf"));
-    }
+    embedded_asset!(app, "./PublicPixel-z84yD.ttf");
+    embedded_asset!(app, "./achievement.ogg");
     app.run();
 }
 
@@ -128,6 +128,7 @@ fn setup(
             font_size: 20.0,
             color: Color::hex("#FFF0CE").unwrap(),
         },
+        sound: asset_server.load("embedded://aca_gamejam_winner2023/achievement.ogg"),
     });
 
     // wall
