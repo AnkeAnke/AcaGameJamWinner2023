@@ -7,7 +7,7 @@ use bevy::{
     text::{BreakLineOn, Text2dBounds},
     utils::Instant,
 };
-use std::f32::consts::*;
+use std::{collections::VecDeque, f32::consts::*};
 
 fn main() {
     App::new()
@@ -23,7 +23,6 @@ fn main() {
             )
                 .chain(),
         )
-        .add_event::<AchievementAdded>()
         .run();
 }
 #[derive(Component)]
@@ -63,9 +62,17 @@ struct Achievement {
     index: usize,
 }
 
-#[derive(Event)]
-struct AchievementAdded {
+// #[derive(Event)]
+struct AchievementToBeAdded {
     text: String,
+}
+
+#[derive(Resource)]
+struct AchievementQueue {
+    queue: VecDeque<AchievementToBeAdded>,
+    num_achieved_achievements: usize,
+    was_dimmer_used: bool,
+    was_achievement_achieved: bool,
 }
 
 const WALL_SIZE_X: f32 = 18.0;
@@ -81,6 +88,14 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.insert_resource(Score { value: 0 });
+
+    commands.insert_resource(AchievementQueue {
+        queue: VecDeque::new(),
+        num_achieved_achievements: 0,
+        was_dimmer_used: false,
+        was_achievement_achieved: false,
+    });
+
     commands.insert_resource(AchievementStyle {
         text_style: TextStyle {
             font: asset_server.load("PublicPixel-z84yD.ttf"),
@@ -88,6 +103,7 @@ fn setup(
             color: Color::hex("#FFF0CE").unwrap(),
         },
     });
+
     // wall
     let mesh = meshes.add(shape::Plane::from_size(TILE_SIZE).into());
     commands.insert_resource(WallTilePalette {
@@ -164,7 +180,7 @@ fn setup(
     commands.spawn(DirectionalLightBundle {
         directional_light: DirectionalLight {
             color: Color::WHITE,
-            illuminance: 5000.0,
+            illuminance: 0.0,
             shadows_enabled: true,
             ..Default::default()
         },
@@ -200,26 +216,26 @@ fn light_switch_update(
     mouse_input: Res<Input<MouseButton>>,
     mut query_light: Query<&mut DirectionalLight>,
     mut query_switch: Query<&mut Transform, With<LightSwitch>>,
-    mut achievement_added: EventWriter<AchievementAdded>,
+    mut achievement_queue: ResMut<AchievementQueue>,
 ) {
     if mouse_input.just_released(MouseButton::Middle) {
         for mut light in query_light.iter_mut() {
             if light.illuminance > 0.0 {
                 light.illuminance = 0.0;
             } else {
-                light.illuminance = 5000.0;
+                light.illuminance = 10000.0;
             }
             score.value += 1;
 
             if score.value == 1 {
-                achievement_added.send(AchievementAdded {
-                    text: "Got it!".to_string(),
+                achievement_queue.queue.push_back(AchievementToBeAdded {
+                    text: "Lights on".to_string(),
                 });
             }
 
-            if score.value == 10 {
-                achievement_added.send(AchievementAdded {
-                    text: "Cookie clicker!".to_string(),
+            if score.value == 100 {
+                achievement_queue.queue.push_back(AchievementToBeAdded {
+                    text: "But I wanted cookies...".to_string(),
                 });
             }
         }
@@ -238,10 +254,17 @@ fn light_temperature_update(
     mut query_light: Query<&mut DirectionalLight>,
     mut query_switch: Query<&mut Transform, With<ColorTemperature>>,
     mut query_temperature: Query<&mut ColorTemperature>,
+    mut achievement_queue: ResMut<AchievementQueue>,
 ) {
     let mut query_temperature = query_temperature.single_mut();
 
     for event in scroll_events.read() {
+        if !achievement_queue.was_dimmer_used {
+            achievement_queue.was_dimmer_used = true;
+            achievement_queue.queue.push_back(AchievementToBeAdded {
+                text: "So colorful *_*".to_string(),
+            });
+        }
         query_temperature.value += match event.unit {
             MouseScrollUnit::Line => event.y,
             MouseScrollUnit::Pixel => {
@@ -386,37 +409,44 @@ fn achievement_update(
     mut commands: Commands,
     achievement_style: Res<AchievementStyle>,
     query_ortho: Query<&OrthographicProjection>,
-    mut achievements_added: EventReader<AchievementAdded>,
+    mut achievement_queue: ResMut<AchievementQueue>,
     mut achievements: Query<(&mut Transform, &Achievement, Entity)>,
 ) {
-    let mut highest_index = 0;
     let mut shortest_lifetime = None;
     for (_, achievement, entity) in achievements.iter_mut() {
         let age = achievement.spawn_time.elapsed().as_secs_f32();
         if age > 5.0 {
             commands.entity(entity).despawn_recursive();
         }
-        if achievement.index > highest_index {
-            highest_index = achievement.index;
+        if achievement.index == achievement_queue.num_achieved_achievements {
             shortest_lifetime = Some(age);
         }
     }
     let ortho = query_ortho.single();
 
-    let lowest_stack_position = shortest_lifetime.map_or(0.0, |t| (t - 0.8).min(0.0));
+    let lowest_stack_position = shortest_lifetime.map_or(0.0, |t| ((t - 1.0) / 1.0).min(0.0));
     for (mut transform, achievement, _) in achievements.iter_mut() {
-        let stack_position =
-            lowest_stack_position + highest_index as f32 - achievement.index as f32;
+        let stack_position = lowest_stack_position
+            + achievement_queue.num_achieved_achievements as f32
+            - achievement.index as f32;
         transform.translation = achievement_position(ortho.area, stack_position);
     }
 
     if lowest_stack_position >= 0.0 {
-        if let Some(event) = achievements_added.read().next() {
+        if let Some(event) = achievement_queue.queue.pop_front() {
+            if !achievement_queue.was_achievement_achieved {
+                achievement_queue.was_achievement_achieved = true;
+                achievement_queue.queue.push_back(AchievementToBeAdded {
+                    text: "Got it!".to_string(),
+                });
+            }
+
+            achievement_queue.num_achieved_achievements += 1;
             spawn_achievement(
                 &mut commands,
                 achievement_style.as_ref(),
                 ortho.area,
-                highest_index + 1,
+                achievement_queue.num_achieved_achievements,
                 &event.text,
             );
         }
